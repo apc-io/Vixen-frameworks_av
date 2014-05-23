@@ -69,7 +69,8 @@ private:
 class MediaPlayerService : public BnMediaPlayerService
 {
     class Client;
-
+    
+public:
     class AudioOutput : public MediaPlayerBase::AudioSink
     {
         class CallbackData;
@@ -172,7 +173,7 @@ class MediaPlayerService : public BnMediaPlayerService
 
     }; // AudioOutput
 
-
+private:
     class AudioCache : public MediaPlayerBase::AudioSink
     {
     public:
@@ -242,7 +243,13 @@ public:
     virtual sp<IMediaRecorder>  createMediaRecorder(pid_t pid);
     void    removeMediaRecorderClient(wp<MediaRecorderClient> client);
     virtual sp<IMediaMetadataRetriever> createMetadataRetriever(pid_t pid);
-
+#ifdef CFG_WMT_WPLAYER
+    status_t suspendVideoInstance(int level, void * player, int flags);
+    status_t killVideoInstance(sp<Client>& client);
+    bool     mOOMKilling;
+    void     onVidoResourceReleased();
+    void     updateMediaBatteryUsage();
+#endif
     virtual sp<IMediaPlayer>    create(pid_t pid, const sp<IMediaPlayerClient>& client, int audioSessionId);
 
     virtual sp<IMemory>         decode(const char* url, uint32_t *pSampleRate, int* pNumChannels, audio_format_t* pFormat);
@@ -363,10 +370,8 @@ private:
                                         const sp<IMediaPlayerClient>& client,
                                         int audioSessionId,
                                         uid_t uid);
-                                Client();
         virtual                 ~Client();
 
-                void            deletePlayer();
 
         sp<MediaPlayerBase>     getPlayer() const { Mutex::Autolock lock(mLock); return mPlayer; }
 
@@ -401,7 +406,11 @@ private:
                     struct sockaddr_in          mRetransmitEndpoint;
                     bool                        mRetransmitEndpointValid;
                     sp<Client>                  mNextClient;
-
+#ifdef CFG_WMT_WPLAYER                    
+					int                         mVideoOOMAdjust;    //video low-memory-kill oob_adj, kill from lowest.
+                    int                         mVideoWidth;
+                    int                         mVideoHeight;
+#endif
         // Metadata filters.
         media::Metadata::Filter mMetadataAllow;  // protected by mLock
         media::Metadata::Filter mMetadataDrop;  // protected by mLock

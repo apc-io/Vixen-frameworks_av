@@ -14,41 +14,42 @@
  * limitations under the License.
  */
 
-#define LOG_TAG "ResamplerCoefficients"
-//#define LOG_NDEBUG 0
-
+#include <dnsampler_filter_coefficients_x128_10112011.h>
+#include <resampler_filter_coefficients_10042011.h>
+#undef LOG_TAG
 #include <utils/Log.h>
+//#include "common_log.h"
+#define LOG_TAG "ResamplerCoefficients"
+#define LOG_NDEBUG 0
 
-#include "filter_coefficients.h"
-
-const int32_t RESAMPLE_FIR_NUM_COEF = 16;
-const int32_t RESAMPLE_FIR_LERP_INT_BITS = 7;
+const int32_t RESAMPLE_FIR_NUM_COEF       = 16;
+const int32_t RESAMPLE_FIR_LERP_INT_BITS  = 7;
 
 using namespace android;
-
 #ifdef __cplusplus
 extern "C" {
 #endif
-
 const int32_t* readResamplerCoefficients(bool upSample) {
 
     ALOGV("readResamplerCoefficients");
-    if (upSample) {
-        return up_sampler_filter_coefficients;
-    } else {
-        return dn_sampler_filter_coefficients;
+    if(upSample) {
+        return resampler_filter_coefficients_10042011;
     }
+    else {
+        return dnsampler_filter_coefficients_x128_10112011;
+   }
 
 }
 
 int32_t readResampleFirNumCoeff() {
+
     return RESAMPLE_FIR_NUM_COEF;
 }
 
 int32_t readResampleFirLerpIntBits() {
-    return RESAMPLE_FIR_LERP_INT_BITS;
-}
 
+   return RESAMPLE_FIR_LERP_INT_BITS;
+}
 #ifdef __cplusplus
 }
 #endif

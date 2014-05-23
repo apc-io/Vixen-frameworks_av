@@ -19,8 +19,10 @@ LOCAL_SRC_FILES:=               \
     AudioResampler.cpp.arm      \
     AudioPolicyService.cpp      \
     ServiceUtilities.cpp        \
-	AudioResamplerCubic.cpp.arm \
     AudioResamplerSinc.cpp.arm
+
+# uncomment to enable AudioResampler::MED_QUALITY
+# LOCAL_SRC_FILES += AudioResamplerCubic.cpp.arm
 
 LOCAL_SRC_FILES += StateQueue.cpp
 
@@ -45,7 +47,8 @@ LOCAL_SHARED_LIBRARIES := \
     libhardware_legacy \
     libeffects \
     libdl \
-    libpowermanager
+    libpowermanager \
+    libwmtapi
 
 LOCAL_STATIC_LIBRARIES := \
     libscheduling_policy \
@@ -77,28 +80,5 @@ LOCAL_CFLAGS += -UFAST_TRACKS_AT_NON_NATIVE_SAMPLE_RATE
 # LOCAL_CFLAGS += -DAUDIO_WATCHDOG
 
 include $(BUILD_SHARED_LIBRARY)
-
-#
-# build audio resampler test tool
-#
-include $(CLEAR_VARS)
-
-LOCAL_SRC_FILES:=               \
-	test-resample.cpp 			\
-    AudioResampler.cpp.arm      \
-	AudioResamplerCubic.cpp.arm \
-    AudioResamplerSinc.cpp.arm
-
-LOCAL_SHARED_LIBRARIES := \
-	libdl \
-    libcutils \
-    libutils
-
-LOCAL_MODULE:= test-resample
-
-LOCAL_MODULE_TAGS := optional
-
-include $(BUILD_EXECUTABLE)
-
 
 include $(call all-makefiles-under,$(LOCAL_PATH))

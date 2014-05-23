@@ -280,7 +280,8 @@ bool CameraSourceTimeLapse::skipFrameAndModifyTimeStamp(int64_t *timestampUs) {
         ALOGV("dataCallbackTimestamp timelapse: got timelapse frame");
 
         mLastTimeLapseFrameRealTimestampUs = *timestampUs;
-        *timestampUs = mLastFrameTimestampUs + mTimeBetweenTimeLapseVideoFramesUs;
+        if (mLastFrameTimestampUs)
+        	*timestampUs = mLastFrameTimestampUs + mTimeBetweenTimeLapseVideoFramesUs;
         return false;
     }
     return false;

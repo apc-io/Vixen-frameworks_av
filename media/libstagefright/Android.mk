@@ -56,6 +56,7 @@ LOCAL_SRC_FILES:=                         \
         avc_utils.cpp                     \
         mp4/FragmentedMP4Parser.cpp       \
         mp4/TrackFragment.cpp             \
+        AVIExtractor.cpp
 
 LOCAL_C_INCLUDES:= \
         $(TOP)/frameworks/av/include/media/stagefright/timedtext \
@@ -64,6 +65,8 @@ LOCAL_C_INCLUDES:= \
         $(TOP)/external/flac/include \
         $(TOP)/external/tremolo \
         $(TOP)/external/openssl/include \
+        $(TOP)/frameworks/av/media/libstagefright/MtvPluginSource \
+        $(TOP)/frameworks/av/media/libstagefright/MtvPluginSource/core
 
 LOCAL_SHARED_LIBRARIES := \
         libbinder \
@@ -88,6 +91,7 @@ LOCAL_SHARED_LIBRARIES := \
         libutils \
         libvorbisidec \
         libz \
+	libstagefright_mtvnode
 
 LOCAL_STATIC_LIBRARIES := \
         libstagefright_color_conversion \
@@ -99,6 +103,9 @@ LOCAL_STATIC_LIBRARIES := \
         libstagefright_httplive \
         libstagefright_id3 \
         libFLAC \
+        libstagefright_mtvpluginsource
+
+
 
 LOCAL_SRC_FILES += \
         chromium_http_stub.cpp
@@ -114,6 +121,18 @@ LOCAL_SHARED_LIBRARIES += \
         libdl
 
 LOCAL_CFLAGS += -Wno-multichar
+
+WMT_METADATA_RETRIVER := disable
+
+ifeq ($(WMT_METADATA_RETRIVER),enable)
+LOCAL_C_INCLUDES += \
+        $(TOP)/device/via/common/metadataretriever \
+        $(TOP)/device/via/common/ffmpeg
+
+#LOCAL_SHARED_LIBRARIES += libwmtmetadataretriever
+
+LOCAL_CFLAGS += -DCFG_WMT_METADATA_RETRIVER
+endif
 
 LOCAL_MODULE:= libstagefright
 

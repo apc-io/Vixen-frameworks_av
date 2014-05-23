@@ -36,7 +36,8 @@ class AudioRecord : virtual public RefBase
 {
 public:
 
-    static const int DEFAULT_SAMPLE_RATE = 8000;
+    static const int DEFAULT_SAMPLE_RATE = 48000;//44100; modify for hal tell audio flinger sr 48k to 
+			                        //avoid redundant resample in hal
 
     /* Events used by AudioRecord callback function (callback_t).
      * Keep in sync with frameworks/base/media/java/android/media/AudioRecord.java NATIVE_EVENT_*.

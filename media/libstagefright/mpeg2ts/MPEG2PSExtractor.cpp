@@ -700,8 +700,16 @@ bool SniffMPEG2PS(
     if (source->readAt(0, header, sizeof(header)) < (ssize_t)sizeof(header)) {
         return false;
     }
-
+#if 0
     if (memcmp("\x00\x00\x01\xba", header, 4) || (header[4] >> 6) != 1) {
+#else 
+    /* The code above is original Android native code. */
+    /* According to ISO/IEC 11172-1 (MPEG1) and ISO/IEC 13818-1 (MPEG2), 
+       MPEG1: pack_start_code (00 00 01 BA)+ ．0010・  (>>5 == 1)
+       MPEG2: pack_start_code (00 00 01 BA)+ ．01・    (>>6 == 1)
+       */
+    if (memcmp("\x00\x00\x01\xba", header, 4) || (((header[4] >> 6) != 1) && ((header[4] >> 5) != 1)) ){
+#endif        
         return false;
     }
 

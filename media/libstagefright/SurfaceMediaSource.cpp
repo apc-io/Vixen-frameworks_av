@@ -380,7 +380,7 @@ static buffer_handle_t getMediaBufferHandle(MediaBuffer *buffer) {
 }
 
 void SurfaceMediaSource::signalBufferReturned(MediaBuffer *buffer) {
-    ALOGV("signalBufferReturned");
+    ALOGV("SurfaceMediaSource::signalBufferReturned");
 
     bool foundBuffer = false;
 

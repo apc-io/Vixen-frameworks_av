@@ -215,14 +215,6 @@ bool ATSParser::Program::parsePID(
 
 void ATSParser::Program::signalDiscontinuity(
         DiscontinuityType type, const sp<AMessage> &extra) {
-    int64_t mediaTimeUs;
-    if ((type & DISCONTINUITY_TIME)
-            && extra != NULL
-            && extra->findInt64(
-                IStreamListener::kKeyMediaTimeUs, &mediaTimeUs)) {
-        mFirstPTSValid = false;
-    }
-
     for (size_t i = 0; i < mStreams.size(); ++i) {
         mStreams.editValueAt(i)->signalDiscontinuity(type, extra);
     }
@@ -242,7 +234,9 @@ struct StreamInfo {
 status_t ATSParser::Program::parseProgramMap(ABitReader *br) {
     unsigned table_id = br->getBits(8);
     ALOGV("  table_id = %u", table_id);
-    CHECK_EQ(table_id, 0x02u);
+    //CHECK_EQ(table_id, 0x02u);
+    if(table_id != 0x02u)
+        return OK;
 
     unsigned section_syntax_indicator = br->getBits(1);
     ALOGV("  section_syntax_indicator = %u", section_syntax_indicator);
@@ -937,13 +931,7 @@ status_t ATSParser::feedTSPacket(const void *data, size_t size) {
 
 void ATSParser::signalDiscontinuity(
         DiscontinuityType type, const sp<AMessage> &extra) {
-    int64_t mediaTimeUs;
-    if ((type & DISCONTINUITY_TIME)
-            && extra != NULL
-            && extra->findInt64(
-                IStreamListener::kKeyMediaTimeUs, &mediaTimeUs)) {
-        mAbsoluteTimeAnchorUs = mediaTimeUs;
-    } else if (type == DISCONTINUITY_ABSOLUTE_TIME) {
+    if (type == DISCONTINUITY_ABSOLUTE_TIME) {
         int64_t timeUs;
         CHECK(extra->findInt64("timeUs", &timeUs));
 
@@ -989,7 +977,7 @@ void ATSParser::parseProgramAssociationTable(ABitReader *br) {
     MY_LOGV("  last_section_number = %u", br->getBits(8));
 
     size_t numProgramBytes = (section_length - 5 /* header */ - 4 /* crc */);
-    CHECK_EQ((numProgramBytes % 4), 0u);
+    //CHECK_EQ((numProgramBytes % 4), 0u);
 
     for (size_t i = 0; i < numProgramBytes / 4; ++i) {
         unsigned program_number = br->getBits(16);
@@ -1039,14 +1027,16 @@ status_t ATSParser::parsePID(
         const sp<PSISection> &section = mPSISections.valueAt(sectionIndex);
 
         if (payload_unit_start_indicator) {
-            CHECK(section->isEmpty());
+            //CHECK(section->isEmpty());
 
             unsigned skip = br->getBits(8);
+            if(skip * 8 > br->numBitsLeft())
+                return OK;
             br->skipBits(skip * 8);
         }
 
 
-        CHECK((br->numBitsLeft() % 8) == 0);
+        //CHECK((br->numBitsLeft() % 8) == 0);
         status_t err = section->append(br->data(), br->numBitsLeft() / 8);
 
         if (err != OK) {
@@ -1083,7 +1073,7 @@ status_t ATSParser::parsePID(
             }
         }
 
-        section->clear();
+        mPSISections.valueAt(sectionIndex)->clear();
 
         return OK;
     }
@@ -1156,8 +1146,9 @@ void ATSParser::parseAdaptationField(ABitReader *br, unsigned PID) {
             numBitsRead += 52;
         }
 
-        CHECK_GE(adaptation_field_length * 8, numBitsRead);
-
+        //CHECK_GE(adaptation_field_length * 8, numBitsRead);
+        if((adaptation_field_length * 8 <= numBitsRead) || (br->numBitsLeft() < (adaptation_field_length * 8 - numBitsRead)))
+            return;
         br->skipBits(adaptation_field_length * 8 - numBitsRead);
     }
 }

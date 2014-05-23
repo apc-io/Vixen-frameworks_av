@@ -43,6 +43,7 @@
 #include <utils/String8.h>
 #include <utils/SystemClock.h>
 #include <utils/Vector.h>
+//#include <utils/wmt_battery.h>
 
 #include <media/IRemoteDisplay.h>
 #include <media/IRemoteDisplayClient.h>
@@ -68,6 +69,10 @@
 #include "TestPlayerStub.h"
 #include "StagefrightPlayer.h"
 #include "nuplayer/NuPlayerDriver.h"
+
+#ifdef CFG_WMT_WPLAYER
+#include "libffplayer.h"
+#endif
 
 #include <OMX.h>
 
@@ -178,6 +183,37 @@ bool findMetadata(const Metadata::Filter& filter, const int32_t val)
     return filter.indexOf(val) >= 0;
 }
 
+#ifdef CFG_WMT_WPLAYER
+/**
+ * 0xABBBBBBB; A(4bits) is for priority level bit, BBBBBBB for the adj value
+ * 
+ * @param value current value
+ * @param adj   -1 if no change the adj value, else the new adj
+ * @param priority 
+ */
+static inline void updateVideoOOMAdj(int& value, int adj, int priority)
+{
+    int old = value;
+    if( value == INT_MAX) {
+        value = ENGINE_PRIORITY_MID;     //set default to mid
+    }
+
+    if( adj != -1)
+        value &= 0xF0000000;     //remove old adj
+
+    if( priority != -1) {
+        value &= 0x0FFFFFFF;     //remove old level
+        value |= priority; 
+    }
+
+    if( adj != -1)
+        value += adj;
+
+    if( old != value)
+        ALOGD("VOOMAdj %X => %X for priority %X, adj %d", old, value, priority, adj);
+}
+#endif
+
 }  // anonymous namespace
 
 
@@ -193,6 +229,42 @@ static bool checkPermission(const char* permissionString) {
     return ok;
 }
 
+#ifdef CFG_WMT_WPLAYER
+
+#define WMT_VIDEO_PLAYING       "wmt.video.playing"
+void clearVideoPlayingInstance()
+{
+    property_set(WMT_VIDEO_PLAYING, "0");
+}
+
+void addVideoPlayingInstance()
+{
+	char value[PROPERTY_VALUE_MAX];
+	property_get(WMT_VIDEO_PLAYING, value, "0");
+	int num = atoi(value);
+    num ++;
+    sprintf(value, "%d", num);
+    property_set(WMT_VIDEO_PLAYING, value);
+    
+    return;
+}
+
+void subVideoPlayingInstance()
+{
+	char value[PROPERTY_VALUE_MAX];
+	property_get(WMT_VIDEO_PLAYING, value, "0");
+	int num = atoi(value);
+    num --;
+    if(num < 0){
+        num = 0;
+    }
+    sprintf(value, "%d", num);
+    property_set(WMT_VIDEO_PLAYING, value);
+
+    return;
+}
+#endif
+
 // TODO: Find real cause of Audio/Video delay in PV framework and remove this workaround
 /* static */ int MediaPlayerService::AudioOutput::mMinBufferCount = 4;
 /* static */ bool MediaPlayerService::AudioOutput::mIsOnEmulator = false;
@@ -200,6 +272,11 @@ static bool checkPermission(const char* permissionString) {
 void MediaPlayerService::instantiate() {
     defaultServiceManager()->addService(
             String16("media.player"), new MediaPlayerService());
+
+    //if mediaserver crash, clear the video playing instance, for screen saver use
+   #ifdef CFG_WMT_WPLAYER
+    clearVideoPlayingInstance();    
+	#endif
 }
 
 MediaPlayerService::MediaPlayerService()
@@ -215,7 +292,9 @@ MediaPlayerService::MediaPlayerService()
     }
     // speaker is on by default
     mBatteryAudio.deviceOn[SPEAKER] = 1;
-
+    #ifdef CFG_WMT_WPLAYER
+	   mOOMKilling = false;
+	#endif   
     MediaPlayerFactory::registerBuiltinFactories();
 }
 
@@ -267,6 +346,94 @@ sp<IMediaPlayer> MediaPlayerService::create(pid_t pid, const sp<IMediaPlayerClie
     }
     return c;
 }
+
+#ifdef CFG_WMT_WPLAYER
+void MediaPlayerService::onVidoResourceReleased()
+{
+    if(!mOOMKilling) {
+	
+        ffplayerBroadcastEvent("wmtlock:0\n");
+
+    }
+}
+
+
+status_t MediaPlayerService::killVideoInstance(sp<Client>& client)
+{
+    //not hold the lock here.
+    sp<MediaPlayerBase> player = client->getPlayer();
+    if(player == NULL)
+        return NO_ERROR;
+
+    mOOMKilling = true;
+
+    ALOGD("VOOM! ask client %08x/%08x to exit, adj=%X", (int)client.get(), (int)player.get(), 
+            client->mVideoOOMAdjust);
+        
+    if( client->mClient != NULL)
+        client->mClient->notify(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, COMMAND_TO_APPLICATION_EXIT, NULL);
+
+    IPCThreadState::self()->flushCommands();
+        
+    //wait until this player really stopped
+    const int WAIT_STOP_TIMEOUT = 2000; //wait 2 seconds.
+    int32_t start = systemTime() / 1000000L;
+    while( client->mVideoOOMAdjust != INT_MAX ) {
+        usleep(10*1000);
+        if( (systemTime() / 1000000L) - start > WAIT_STOP_TIMEOUT) {
+            client->stop();
+            ALOGD("VOOM! Force close client %08x/%08x.", (int)client.get(), (int)player.get());
+            break;
+        }
+    }
+    mOOMKilling = false;
+    return NO_ERROR;
+}
+    
+
+/* 1 Called from CameraService, because they Need MB buffer that may be hold by MovieWallPaper/Browser
+ * 2 Called from Power, because they want to suspend
+ * 3 Called from WmtMetadataRetriever, request the LOW_PRIORITY_VIDEO suspend
+ * 4 Called from something else, mostly from player, want us release MB/Video resource 
+ */
+status_t MediaPlayerService::suspendVideoInstance(int level, void * player, int flags)
+{
+    sp<Client> killClient;
+KillAgain:
+    {
+        Mutex::Autolock lock(mLock);
+        int i, n = mClients.size();
+        ALOGD("freeVideoInstance, cur size:%d, Level %x",n, level);
+        for (i = 0; i < n; ++i) {
+            sp<Client> client = mClients[i].promote();
+            if (client == NULL || client->mVideoOOMAdjust == INT_MAX || client->getPlayer() == NULL)
+                continue;
+
+            if( level == 0) {
+                killClient = client;
+                break;  //start to kill without the mutex
+            }
+
+            if( (client->mVideoOOMAdjust & 0xF0000000) > level)
+                continue;
+
+            if( client->getPlayer().get() == player)
+                continue;
+            
+            if( killClient == NULL || client->mVideoOOMAdjust < killClient->mVideoOOMAdjust)
+                killClient = client;
+        }
+    }
+
+    if(killClient != NULL) {
+        killVideoInstance(killClient);
+        killClient.clear();
+        if (level == 0)
+            goto KillAgain;
+    }
+    return NO_ERROR;
+}
+#endif
 
 sp<IOMX> MediaPlayerService::getOMX() {
     Mutex::Autolock autoLock(mLock);
@@ -347,8 +514,16 @@ status_t MediaPlayerService::Client::dump(int fd, const Vector<String16>& args) 
     char buffer[SIZE];
     String8 result;
     result.append(" Client\n");
-    snprintf(buffer, 255, "  pid(%d), connId(%d), status(%d), looping(%s)\n",
+     #ifdef CFG_WMT_WPLAYER
+	 
+	
+	snprintf(buffer, 255, "  %p/%p, pid(%d), connId(%d), status(%d), looping(%s), adj(%X)\n",
+            this, mPlayer.get(),
+            mPid, mConnId, mStatus, mLoop?"true": "false", mVideoOOMAdjust);
+	#else
+	   snprintf(buffer, 255, "  pid(%d), connId(%d), status(%d), looping(%s)\n",
             mPid, mConnId, mStatus, mLoop?"true": "false");
+	#endif		
     result.append(buffer);
     write(fd, result.string(), result.size());
     if (mPlayer != NULL) {
@@ -475,10 +650,34 @@ status_t MediaPlayerService::dump(int fd, const Vector<String16>& args)
     return NO_ERROR;
 }
 
+#ifdef CFG_WMT_WPLAYER
+void MediaPlayerService::updateMediaBatteryUsage()
+{
+    int i, n = mClients.size();
+    int sum = 0;
+    for (i = 0; i < n; ++i) {
+        sp<Client> client = mClients[i].promote();
+        if (client != NULL) {
+            sum += ( client->mVideoWidth * client->mVideoHeight );
+            ALOGV("New Video wxh %dx%d sum %d", client->mVideoWidth, client->mVideoHeight, sum);
+        }
+    }
+
+    int percent = (sum * 100) / (1920 * 1080);
+    percent = percent > 100 ? 100 : percent;
+    //reportModuleChangeEventForBattery(BM_VIDEO, percent);
+    ALOGV("Video Battery Usage %%%d", percent);
+    return;
+}
+#endif
+
 void MediaPlayerService::removeClient(wp<Client> client)
 {
     Mutex::Autolock lock(mLock);
     mClients.remove(client);
+    #ifdef CFG_WMT_WPLAYER
+	updateMediaBatteryUsage();
+	#endif
 }
 
 MediaPlayerService::Client::Client(
@@ -496,7 +695,11 @@ MediaPlayerService::Client::Client(
     mAudioSessionId = audioSessionId;
     mUID = uid;
     mRetransmitEndpointValid = false;
-
+#ifdef CFG_WMT_WPLAYER
+    mVideoOOMAdjust = INT_MAX;        //no need to kill
+    mVideoWidth = 0;
+    mVideoHeight = 0;
+#endif	
 #if CALLBACK_ANTAGONIZER
     ALOGD("create Antagonizer");
     mAntagonizer = new Antagonizer(notify, this);
@@ -538,7 +741,12 @@ void MediaPlayerService::Client::disconnect()
         p->reset();
     }
 
+    
     disconnectNativeWindow();
+#ifdef CFG_WMT_WPLAYER
+	mVideoOOMAdjust = INT_MAX;
+    mService->onVidoResourceReleased();
+#endif	
 
     IPCThreadState::self()->flushCommands();
 }
@@ -635,7 +843,25 @@ status_t MediaPlayerService::Client::setDataSource(
         close(fd);
         return mStatus;
     } else {
-        player_type playerType = MediaPlayerFactory::getPlayerType(this, url);
+        player_type playerType;
+        String8 playerName("native");
+        if (headers != 0 && headers->indexOfKey(String8("playertype")) >= 0) 
+            playerName = headers->valueFor(String8("playertype"));
+
+        if (!strncasecmp(playerName.string(),"PV",2))
+            playerType = PV_PLAYER;
+        else if (!strncasecmp(playerName.string(),"SONIVOX",7))
+            playerType = SONIVOX_PLAYER;
+        else if (!strncasecmp(playerName.string(),"STAGEFRIGHT",11))
+            playerType = STAGEFRIGHT_PLAYER;
+        else if (!strncasecmp(playerName.string(),"NU",2))
+            playerType = NU_PLAYER;
+        else if (!strncasecmp(playerName.string(),"WMT",3))
+            playerType = WMT_PLAYER;
+        else if (!strncasecmp(playerName.string(),"STAGEFRIGHT",11))
+            playerType = STAGEFRIGHT_PLAYER;
+        else
+            playerType = MediaPlayerFactory::getPlayerType(this, url);
         sp<MediaPlayerBase> p = setDataSource_pre(playerType);
         if (p == NULL) {
             return NO_INIT;
@@ -704,7 +930,9 @@ void MediaPlayerService::Client::disconnectNativeWindow() {
     if (mConnectedWindow != NULL) {
         status_t err = native_window_api_disconnect(mConnectedWindow.get(),
                 NATIVE_WINDOW_API_MEDIA);
-
+#ifdef CFG_WMT_WPLAYER
+        subVideoPlayingInstance();
+#endif
         if (err != OK) {
             ALOGW("native_window_api_disconnect returned an error: %s (%d)",
                     strerror(-err), err);
@@ -731,7 +959,9 @@ status_t MediaPlayerService::Client::setVideoSurfaceTexture(
         anw = new SurfaceTextureClient(surfaceTexture);
         status_t err = native_window_api_connect(anw.get(),
                 NATIVE_WINDOW_API_MEDIA);
-
+#ifdef CFG_WMT_WPLAYER
+        addVideoPlayingInstance();
+#endif		
         if (err != OK) {
             ALOGE("setVideoSurfaceTexture failed: %d", err);
             // Note that we must do the reset before disconnecting from the ANW.
@@ -840,6 +1070,11 @@ status_t MediaPlayerService::Client::prepareAsync()
     ALOGD("start Antagonizer");
     if (ret == NO_ERROR) mAntagonizer->start();
 #endif
+#ifdef CFG_WMT_WPLAYER
+    if( ret == NO_ERROR && mConnectedWindow != NULL) {
+        updateVideoOOMAdj(mVideoOOMAdjust, mConnId, -1);
+    }
+#endif
     return ret;
 }
 
@@ -849,7 +1084,14 @@ status_t MediaPlayerService::Client::start()
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
     p->setLooping(mLoop);
+#ifdef CFG_WMT_WPLAYER	
+    status_t s = p->start();
+    if(mVideoOOMAdjust != INT_MAX)
+        updateVideoOOMAdj(mVideoOOMAdjust, mConnId, -1);
+    return s;
+#else
     return p->start();
+#endif	
 }
 
 status_t MediaPlayerService::Client::stop()
@@ -857,7 +1099,14 @@ status_t MediaPlayerService::Client::stop()
     ALOGV("[%d] stop", mConnId);
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
+#ifdef CFG_WMT_WPLAYER		
+    status_t s = p->stop();
+    mVideoOOMAdjust = INT_MAX;  /* no need to kill anymore */
+    mService->onVidoResourceReleased();
+    return s;
+#else
     return p->stop();
+#endif	
 }
 
 status_t MediaPlayerService::Client::pause()
@@ -865,7 +1114,17 @@ status_t MediaPlayerService::Client::pause()
     ALOGV("[%d] pause", mConnId);
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
-    return p->pause();
+#ifdef CFG_WMT_WPLAYER	
+    status_t s = p->pause();
+
+    /* kill the paused video firstly */
+    if( s == NO_ERROR && mConnectedWindow != NULL ) {
+        updateVideoOOMAdj(mVideoOOMAdjust, 0, -1);
+    }
+    return s;
+#else
+   return p->pause();
+#endif	
 }
 
 status_t MediaPlayerService::Client::isPlaying(bool* state)
@@ -941,7 +1200,14 @@ status_t MediaPlayerService::Client::reset()
     mRetransmitEndpointValid = false;
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
+#ifdef CFG_WMT_WPLAYER		
+    status_t s = p->reset();
+    mVideoOOMAdjust = INT_MAX;
+    mService->onVidoResourceReleased();
+    return s;
+#else
     return p->reset();
+#endif	
 }
 
 status_t MediaPlayerService::Client::setAudioStreamType(audio_stream_type_t type)
@@ -1003,6 +1269,14 @@ status_t MediaPlayerService::Client::setParameter(int key, const Parcel &request
     ALOGV("[%d] setParameter(%d)", mConnId, key);
     sp<MediaPlayerBase> p = getPlayer();
     if (p == 0) return UNKNOWN_ERROR;
+#ifdef CFG_WMT_WPLAYER	
+    if( key == (int)COMMAND_TO_LOW_PRIORITY_ENGINE ) {
+        updateVideoOOMAdj(mVideoOOMAdjust, -1, ENGINE_PRIORITY_LOW);
+    }
+    else if(key == (int)COMMAND_TO_HIGH_PRIORITY_ENGINE){
+        updateVideoOOMAdj(mVideoOOMAdjust, -1, ENGINE_PRIORITY_HIGH);
+    }
+#endif
     return p->setParameter(key, request);
 }
 
@@ -1094,7 +1368,13 @@ void MediaPlayerService::Client::notify(
         // also access mMetadataUpdated and clears it.
         client->addNewMetadataUpdate(metadata_type);
     }
-
+#ifdef CFG_WMT_WPLAYER	
+    if (MEDIA_SET_VIDEO_SIZE == msg){
+        client->mVideoWidth = ext1;
+        client->mVideoHeight = ext2;
+        client->mService->updateMediaBatteryUsage();
+    }
+#endif
     if (c != NULL) {
         ALOGV("[%d] notify (%p, %d, %d, %d)", client->mConnId, cookie, msg, ext1, ext2);
         c->notify(msg, ext1, ext2, obj);

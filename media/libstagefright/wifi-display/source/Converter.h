@@ -44,7 +44,6 @@ struct Converter : public AHandler {
     size_t getInputBufferCount() const;
 
     sp<AMessage> getOutputFormat() const;
-    bool needToManuallyPrependSPSPPS() const;
 
     void feedAccessUnit(const sp<ABuffer> &accessUnit);
     void signalEOS();
@@ -79,7 +78,6 @@ private:
     bool mIsVideo;
     bool mIsPCMAudio;
     sp<AMessage> mOutputFormat;
-    bool mNeedToManuallyPrependSPSPPS;
 
     sp<MediaCodec> mEncoder;
     sp<AMessage> mEncoderActivityNotify;

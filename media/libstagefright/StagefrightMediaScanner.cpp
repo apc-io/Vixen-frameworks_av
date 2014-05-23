@@ -42,7 +42,9 @@ static bool FileHasAcceptableExtension(const char *extension) {
         ".mpeg", ".ogg", ".mid", ".smf", ".imy", ".wma", ".aac",
         ".wav", ".amr", ".midi", ".xmf", ".rtttl", ".rtx", ".ota",
         ".mkv", ".mka", ".webm", ".ts", ".fl", ".flac", ".mxmf",
-        ".avi", ".mpeg", ".mpg"
+        ".avi", ".mpeg", ".mpg", ".flv", ".f4v", ".rmvb", ".rm", ".ram", ".mov",
+        ".ape", ".vob", ".wmv", ".asf", ".trp", ".mts", ".m2ts",".mp2", ".dat", 
+        ".evo", ".ogm", ".mmf", ".ac3", ".ra", ".tp" , ".dts" , ".m4r"
     };
     static const size_t kNumValidExtensions =
         sizeof(kValidExtensions) / sizeof(kValidExtensions[0]);
@@ -166,6 +168,14 @@ MediaScanResult StagefrightMediaScanner::processFileInternal(
         }
     }
 
+    if((mRetriever->extractMetadata(METADATA_KEY_HAS_AUDIO) == NULL) && (mRetriever->extractMetadata(METADATA_KEY_HAS_VIDEO) == NULL))
+    {
+        ALOGD("Non-media Content Found in File %s\n",path);
+        status = client.setMimeType("file/data");
+        if (status) {
+            return MEDIA_SCAN_RESULT_ERROR;
+        }
+    }
     struct KeyMap {
         const char *tag;
         int key;
@@ -198,7 +208,14 @@ MediaScanResult StagefrightMediaScanner::processFileInternal(
             }
         }
     }
+	  sp<IMemory> mem = mRetriever->extractAlbumArt();
 
+        if (mem != NULL) {
+            MediaAlbumArt *art = static_cast<MediaAlbumArt *>(mem->pointer());
+            uint8_t *data = (uint8_t *)malloc(art->mSize);
+            memcpy(data, &art[1], art->mSize);
+            client.addBytesTag(data, art->mSize);
+		}
     return MEDIA_SCAN_RESULT_OK;
 }
 

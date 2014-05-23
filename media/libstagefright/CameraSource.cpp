@@ -549,7 +549,9 @@ status_t CameraSource::initWithCameraAccess(
     mMeta->setInt32(kKeyColorFormat, mColorFormat);
     mMeta->setInt32(kKeyWidth,       mVideoSize.width);
     mMeta->setInt32(kKeyHeight,      mVideoSize.height);
-    mMeta->setInt32(kKeyStride,      mVideoSize.width);
+    //Wmt H264 encode needs 64bytes alignment
+    //both camera.default.so and libOMX.WMT.Video.Encoder.so need align the buffer
+    mMeta->setInt32(kKeyStride,      (mVideoSize.width + 63) & ~63);
     mMeta->setInt32(kKeySliceHeight, mVideoSize.height);
     mMeta->setInt32(kKeyFrameRate,   mVideoFrameRate);
     return OK;

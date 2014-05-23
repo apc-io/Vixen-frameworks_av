@@ -44,7 +44,9 @@ private:
 };
 
 class MediaBuffer {
-public:
+public:	
+	int mediaType;// stevexu  1 video  0 audio
+
     // The underlying data remains the responsibility of the caller!
     MediaBuffer(void *data, size_t size);
 
@@ -106,7 +108,7 @@ private:
     sp<ABuffer> mBuffer;
 
     bool mOwnsData;
-
+	
     sp<MetaData> mMetaData;
 
     MediaBuffer *mOriginal;

@@ -61,7 +61,10 @@ void MediaScannerClient::beginFile()
     mNames = new StringArray;
     mValues = new StringArray;
 }
-
+status_t MediaScannerClient::addBytesTag( uint8_t* data,const int size)
+{
+	return handleBytesTag(data, size);
+}
 status_t MediaScannerClient::addStringTag(const char* name, const char* value)
 {
     if (mLocaleEncoding != kEncodingNone) {

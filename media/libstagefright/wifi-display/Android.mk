@@ -1,4 +1,5 @@
 LOCAL_PATH:= $(call my-dir)
+#ifneq ($(TARGET_BOARD_PLATFORM),wmt)
 
 include $(CLEAR_VARS)
 
@@ -17,7 +18,6 @@ LOCAL_SRC_FILES:= \
         source/Sender.cpp               \
         source/TSPacketizer.cpp         \
         source/WifiDisplaySource.cpp    \
-        TimeSeries.cpp                  \
 
 LOCAL_C_INCLUDES:= \
         $(TOP)/frameworks/av/media/libstagefright \
@@ -83,3 +83,4 @@ LOCAL_MODULE:= udptest
 LOCAL_MODULE_TAGS := debug
 
 include $(BUILD_EXECUTABLE)
+#endif

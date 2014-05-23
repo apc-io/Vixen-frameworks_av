@@ -28,6 +28,9 @@
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/OMXCodec.h>
 #include <media/stagefright/MediaDefs.h>
+#ifdef CFG_WMT_METADATA_RETRIVER
+#include "WmtMetadataRetriever.h"
+#endif
 
 namespace android {
 
@@ -35,6 +38,10 @@ StagefrightMetadataRetriever::StagefrightMetadataRetriever()
     : mParsedMetaData(false),
       mAlbumArt(NULL) {
     ALOGV("StagefrightMetadataRetriever()");
+
+#ifdef CFG_WMT_METADATA_RETRIVER
+    mExternalRetriever = NULL;
+#endif
 
     DataSource::RegisterDefaultSniffers();
     CHECK_EQ(mClient.connect(), (status_t)OK);
@@ -45,6 +52,11 @@ StagefrightMetadataRetriever::~StagefrightMetadataRetriever() {
 
     delete mAlbumArt;
     mAlbumArt = NULL;
+
+#ifdef CFG_WMT_METADATA_RETRIVER
+    delete mExternalRetriever;
+    mExternalRetriever = NULL;
+#endif
 
     mClient.disconnect();
 }
@@ -72,7 +84,21 @@ status_t StagefrightMetadataRetriever::setDataSource(
 
         mSource.clear();
 
+#ifdef CFG_WMT_METADATA_RETRIVER
+        delete mExternalRetriever;
+        mExternalRetriever = NULL;
+        // if not android default support format
+        // let it go through wmt metadata retriever
+        mExternalRetriever = new WmtMetadataRetriever;
+        if(mExternalRetriever == NULL){
+            ALOGE("Unable to instantiate an external retriever for '%s'.", uri);
+            return UNKNOWN_ERROR;
+        }
+
+        return mExternalRetriever->setDataSource(uri,headers);
+#else
         return UNKNOWN_ERROR;
+#endif
     }
 
     return OK;
@@ -91,6 +117,10 @@ status_t StagefrightMetadataRetriever::setDataSource(
     mAlbumArt = NULL;
 
     mSource = new FileSource(fd, offset, length);
+#ifdef CFG_WMT_METADATA_RETRIVER
+    mUri.clear();
+    mUri.appendFormat("fd://%d,%lld,%lld", fd, offset, length);
+#endif
 
     status_t err;
     if ((err = mSource->initCheck()) != OK) {
@@ -102,13 +132,54 @@ status_t StagefrightMetadataRetriever::setDataSource(
     mExtractor = MediaExtractor::Create(mSource);
 
     if (mExtractor == NULL) {
-        mSource.clear();
+#ifdef CFG_WMT_METADATA_RETRIVER
+        status_t ret;
+        fd = dup(fd);
 
+        mSource.clear();
+        delete mExternalRetriever;
+        mExternalRetriever = NULL;
+
+        // if not android default support format
+        // let it go through wmt metadata retriever
+        mExternalRetriever = new WmtMetadataRetriever;
+        if(mExternalRetriever == NULL){
+            ALOGE("Unable to instantiate an external retriever for '%s'.", mUri.string());
+            close(fd);
+            return UNKNOWN_ERROR;
+        }
+
+        ret = mExternalRetriever->setDataSource(fd, offset, length);
+        close(fd);
+        return ret;
+#else
+        mSource.clear();
         return UNKNOWN_ERROR;
+#endif
     }
 
     return OK;
 }
+
+#ifdef CFG_WMT_METADATA_RETRIVER
+status_t StagefrightMetadataRetriever::createExternalRetriever(){
+    if(mExternalRetriever == NULL){
+        mExternalRetriever = new WmtMetadataRetriever;
+        if(mExternalRetriever == NULL){
+            ALOGE("Unable to instantiate an external retriever for '%s'.", mUri.string());
+            return NO_MEMORY;
+        }
+        mExternalRetriever->setDataSource(mUri.string(),NULL);
+    }
+    WmtMetadataRetriever *wmtRetriver = 
+        static_cast<WmtMetadataRetriever *>(mExternalRetriever);
+    if(wmtRetriver->initCheck()){
+        ALOGE("Unable to initiate an external retriever for '%s'.", mUri.string());
+        return NO_INIT;
+    }
+    return OK;
+}
+#endif
 
 static bool isYUV420PlanarSupported(
             OMXClient *client,
@@ -323,16 +394,26 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
 
     ALOGV("getFrameAtTime: %lld us option: %d", timeUs, option);
 
-    if (mExtractor.get() == NULL) {
+    if (mExtractor.get() == NULL){
+#ifdef CFG_WMT_METADATA_RETRIVER
+        return mExternalRetriever->getFrameAtTime(timeUs,option);
+#else
         ALOGV("no extractor.");
         return NULL;
+#endif
     }
 
     sp<MetaData> fileMeta = mExtractor->getMetaData();
 
     if (fileMeta == NULL) {
         ALOGV("extractor doesn't publish metadata, failed to initialize?");
+#ifdef CFG_WMT_METADATA_RETRIVER
+        if(createExternalRetriever() != OK)
+            return NULL;
+        return mExternalRetriever->getFrameAtTime(timeUs,option);
+#else
         return NULL;
+#endif
     }
 
     int32_t drm = 0;
@@ -355,8 +436,15 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
     }
 
     if (i == n) {
-        ALOGV("no video track found.");
+#ifdef CFG_WMT_METADATA_RETRIVER
+        ALOGV("extractor can't find video track. Try external.");
+        if(createExternalRetriever() != OK)
+            return NULL;
+        return mExternalRetriever->getFrameAtTime(timeUs,option);
+#else
+        ALOGV("unable to instantiate video track.");
         return NULL;
+#endif
     }
 
     sp<MetaData> trackMeta = mExtractor->getTrackMetaData(
@@ -366,7 +454,13 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
 
     if (source.get() == NULL) {
         ALOGV("unable to instantiate video track.");
+#ifdef CFG_WMT_METADATA_RETRIVER
+        if(createExternalRetriever() != OK)
+            return NULL;
+        return mExternalRetriever->getFrameAtTime(timeUs,option);
+#else
         return NULL;
+#endif
     }
 
     const void *data;
@@ -380,6 +474,22 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
         memcpy(mAlbumArt->mData, data, dataSize);
     }
 
+#ifdef CFG_WMT_METADATA_RETRIVER
+    if(createExternalRetriever() == OK) {
+        int64_t thumbNailTime = -1;
+        VideoFrame *videoFrame = NULL;
+
+        if (!trackMeta->findInt64(kKeyThumbnailTime, &thumbNailTime)
+            || thumbNailTime < 0)
+        thumbNailTime = -1;
+
+        videoFrame = mExternalRetriever->getFrameAtTime(thumbNailTime,option);
+        if (videoFrame)
+            return videoFrame;
+    }
+    ALOGI("external retriver getFrame fail. using OMX uri %s",mUri.string());
+#endif
+
     VideoFrame *frame =
         extractVideoFrameWithCodecFlags(
                 &mClient, trackMeta, source, OMXCodec::kPreferSoftwareCodecs,
@@ -390,7 +500,7 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
              "trying hardware decoder.");
 
         frame = extractVideoFrameWithCodecFlags(&mClient, trackMeta, source, 0,
-                        timeUs, option);
+                timeUs, option);
     }
 
     return frame;
@@ -400,9 +510,12 @@ MediaAlbumArt *StagefrightMetadataRetriever::extractAlbumArt() {
     ALOGV("extractAlbumArt (extractor: %s)", mExtractor.get() != NULL ? "YES" : "NO");
 
     if (mExtractor == NULL) {
+#ifdef CFG_WMT_METADATA_RETRIVER
+        return mExternalRetriever->extractAlbumArt();
+#else
         return NULL;
+#endif
     }
-
     if (!mParsedMetaData) {
         parseMetaData();
 
@@ -413,12 +526,25 @@ MediaAlbumArt *StagefrightMetadataRetriever::extractAlbumArt() {
         return new MediaAlbumArt(*mAlbumArt);
     }
 
+#ifdef CFG_WMT_METADATA_RETRIVER
+    if (mExternalRetriever != NULL){
+        ALOGV("failed to extract extractAlbumArt.");
+        if(createExternalRetriever() != OK)
+            return NULL;
+        return mExternalRetriever->extractAlbumArt();
+    }
+#endif
+
     return NULL;
 }
 
 const char *StagefrightMetadataRetriever::extractMetadata(int keyCode) {
     if (mExtractor == NULL) {
+#ifdef CFG_WMT_METADATA_RETRIVER
+        return mExternalRetriever->extractMetadata(keyCode);
+#else
         return NULL;
+#endif
     }
 
     if (!mParsedMetaData) {
@@ -430,6 +556,14 @@ const char *StagefrightMetadataRetriever::extractMetadata(int keyCode) {
     ssize_t index = mMetaData.indexOfKey(keyCode);
 
     if (index < 0) {
+#ifdef CFG_WMT_METADATA_RETRIVER
+        if (mExternalRetriever != NULL) {
+            ALOGV("failed to extract extractMetadata.");
+            if(createExternalRetriever() != OK)
+                return NULL;
+            return mExternalRetriever->extractMetadata(keyCode);
+        }
+#endif
         return NULL;
     }
 

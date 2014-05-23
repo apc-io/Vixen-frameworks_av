@@ -85,6 +85,11 @@
 
 #include "SchedulingPolicyService.h"
 
+extern "C" int wmt_vpp_init(void);
+extern "C" int wmt_vpp_exit(void);
+extern "C" int wmt_vpp_vout_set_audio_passthru(int enable);
+#define HW_WMT_AUDIO_PASSTHROUGH "hw.wmt.audio.passthrough"
+
 // ----------------------------------------------------------------------------
 
 // Note: the following macro is used for extremely verbose logging message.  In
@@ -797,6 +802,19 @@ status_t AudioFlinger::setStreamVolume(audio_stream_type_t stream, float value,
         }
     } else {
         thread->setStreamVolume(stream, value);
+    }
+    
+     // FM stream volume controled by hw
+    { 
+    	audio_hw_device_t *hwDevice = mPrimaryHardwareDev->hwDevice(); 
+        AutoMutex lock(mHardwareLock);
+        if (stream == AUDIO_STREAM_FM_RADIO && hwDevice) {
+            mHardwareStatus = AUDIO_HW_SET_MASTER_VOLUME;
+            if (hwDevice->set_master_volume(hwDevice, value) == NO_ERROR) {
+                value = 1.0f;
+            }
+            mHardwareStatus = AUDIO_HW_IDLE;
+        }
     }
 
     return NO_ERROR;
@@ -1964,6 +1982,16 @@ status_t AudioFlinger::PlaybackThread::addTrack_l(const sp<Track>& track)
             }
         }
 
+        size_t count = mActiveTracks.size();
+        for (size_t i=0 ; i<count ; i++) {
+            sp<Track> t = mActiveTracks[i].promote();
+            if (t == 0) continue;
+            if( t->isPassthrough()){
+                property_set(HW_WMT_AUDIO_PASSTHROUGH, "1");
+                break;
+            }
+        }
+
         status = NO_ERROR;
     }
 
@@ -2208,7 +2236,7 @@ audio_stream_t* AudioFlinger::PlaybackThread::stream() const
 
 uint32_t AudioFlinger::PlaybackThread::activeSleepTimeUs() const
 {
-    return (uint32_t)((uint32_t)((mNormalFrameCount * 1000) / mSampleRate) * 1000);
+    return (uint32_t)((uint32_t)((mNormalFrameCount * 1000) / mSampleRate) * 1000) * 2/3;//modify to avoid underrun.
 }
 
 status_t AudioFlinger::PlaybackThread::setSyncEvent(const sp<SyncEvent>& event)
@@ -2257,7 +2285,8 @@ AudioFlinger::MixerThread::MixerThread(const sp<AudioFlinger>& audioFlinger, Aud
     :   PlaybackThread(audioFlinger, output, id, device, type),
         // mAudioMixer below
         // mFastMixer below
-        mFastMixerFutex(0)
+        mFastMixerFutex(0),
+        mPassthroughEnabled(false)
         // mOutputSink below
         // mPipeSink below
         // mNormalSink below
@@ -2392,6 +2421,8 @@ AudioFlinger::MixerThread::MixerThread(const sp<AudioFlinger>& audioFlinger, Aud
         mNormalSink = initFastMixer ? mPipeSink : mOutputSink;
         break;
     }
+
+    wmt_vpp_init();
 }
 
 AudioFlinger::MixerThread::~MixerThread()
@@ -2428,6 +2459,8 @@ AudioFlinger::MixerThread::~MixerThread()
 #endif
     }
     delete mAudioMixer;
+    
+    wmt_vpp_exit();
 }
 
 class CpuStats {
@@ -2855,7 +2888,37 @@ void AudioFlinger::MixerThread::threadLoop_mix()
     }
 
     // mix buffers...
-    mAudioMixer->process(pts);
+    if(mPassthroughTrack == NULL) {
+        if(mPassthroughEnabled) {
+            wmt_vpp_vout_set_audio_passthru(0);
+            mPassthroughEnabled = false;
+        }
+        mAudioMixer->process(pts);
+    } else {
+        if(!mPassthroughEnabled) {
+            wmt_vpp_vout_set_audio_passthru(1);
+            mPassthroughEnabled = true;
+        }
+        //copied from DirectOutputThread
+        AudioBufferProvider::Buffer buffer;
+        size_t frameCount = mFrameCount;
+        int8_t *curBuf = (int8_t *)mMixBuffer;
+        // output audio to hardware
+        while (frameCount) {
+            buffer.frameCount = frameCount;
+            mPassthroughTrack->getNextBuffer(&buffer);
+            if (CC_UNLIKELY(buffer.raw == NULL)) {
+                memset(curBuf, 0, frameCount * mFrameSize);
+                break;
+            }
+            memcpy(curBuf, buffer.raw, buffer.frameCount * mFrameSize);
+            frameCount -= buffer.frameCount;
+            curBuf += buffer.frameCount * mFrameSize;
+            mPassthroughTrack->releaseBuffer(&buffer);
+        }
+        mPassthroughTrack = NULL;
+    }
+
     // increase sleep time progressively when application underrun condition clears.
     // Only increase sleep time if the mixer is ready for two consecutive times to avoid
     // that a steady state of alternating ready/not ready conditions keeps the sleep time
@@ -3370,6 +3433,19 @@ track_is_ready: ;
                 removeTrack_l(track);
             }
         }
+
+        size_t count = mActiveTracks.size();
+        bool isPassthrough = 0;
+        for (size_t i=0; i<count; i++) {
+            sp<Track> t = mActiveTracks[i].promote();
+            if (t == 0) continue;
+            if( t->isPassthrough()){
+                isPassthrough = 1;
+                break;
+            }
+        }
+        if(!isPassthrough)
+            property_set(HW_WMT_AUDIO_PASSTHROUGH, "0");
     }
 
     // mix buffer must be cleared if all tracks are connected to an
@@ -3384,6 +3460,30 @@ track_is_ready: ;
     mMixerStatusIgnoringFastTracks = mixerStatus;
     if (fastTracks > 0) {
         mixerStatus = MIXER_TRACKS_READY;
+    }
+
+
+    mPassthroughTrack = NULL;
+    count = mActiveTracks.size();
+    for (size_t i=0 ; i<count ; i++) {
+        sp<Track> t = mActiveTracks[i].promote();
+        if (t == 0) continue;
+        if( t->isPassthrough()){
+            mPassthroughTrack = t;
+            ALOGV("Find passthrough track : %p %d/%d", t.get(), i, count);
+
+            AudioBufferProvider::Buffer buffer;
+            for (size_t j=0 ; j < count; j++) {
+                if( i == j) continue;  
+                t = mActiveTracks[j].promote();
+                if (t == 0) continue;
+                buffer.frameCount = mFrameCount;
+                t->getNextBuffer(&buffer);
+                ALOGV(" drain others #%d: %p %d", j, t.get(), buffer.frameCount);
+                t->releaseBuffer(&buffer);
+            }
+            break;
+        }
     }
     return mixerStatus;
 }
@@ -3833,6 +3933,19 @@ AudioFlinger::PlaybackThread::mixer_state AudioFlinger::DirectOutputThread::prep
         if (trackToRemove->isTerminated()) {
             removeTrack_l(trackToRemove);
         }
+
+        size_t count = mActiveTracks.size();
+        bool isPassthrough = 0;
+        for (size_t i=0; i<count; i++) {
+            sp<Track> t = mActiveTracks[i].promote();
+            if (t == 0) continue;
+            if( t->isPassthrough()){
+                isPassthrough = 1;
+                break;
+            }
+        }
+        if(!isPassthrough)
+            property_set(HW_WMT_AUDIO_PASSTHROUGH, "0");
     }
 
     return mixerStatus;
@@ -4681,7 +4794,7 @@ void AudioFlinger::PlaybackThread::Track::flush()
     if (thread != 0) {
         Mutex::Autolock _l(thread->mLock);
         if (mState != STOPPING_1 && mState != STOPPING_2 && mState != STOPPED && mState != PAUSED &&
-                mState != PAUSING && mState != IDLE && mState != FLUSHED) {
+                mState != PAUSING) {
             return;
         }
         // No point remaining in PAUSED state after a flush => go to

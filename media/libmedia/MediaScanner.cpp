@@ -175,11 +175,21 @@ MediaScanResult MediaScanner::doProcessDirectoryEntry(
     struct stat statbuf;
     const char* name = entry->d_name;
 
+    #if 1
+
+    // ignore all folders start with "." 
+    if (name[0] == '.' && strcmp(name,".hide") != 0)
+        return MEDIA_SCAN_RESULT_SKIPPED;
+
+    #else
     // ignore "." and ".."
     if (name[0] == '.' && (name[1] == 0 || (name[1] == '.' && name[2] == 0))) {
         return MEDIA_SCAN_RESULT_SKIPPED;
     }
-
+    if(strcmp(name,".databases") == 0){
+        return MEDIA_SCAN_RESULT_SKIPPED;
+    }
+    #endif
     int nameLength = strlen(name);
     if (nameLength + 1 > pathRemaining) {
         // path too long!
@@ -206,7 +216,7 @@ MediaScanResult MediaScanner::doProcessDirectoryEntry(
         bool childNoMedia = noMedia;
         // set noMedia flag on directories with a name that starts with '.'
         // for example, the Mac ".Trashes" directory
-        if (name[0] == '.')
+        if (name[0] == '.' && strcmp(name,".hide") != 0)
             childNoMedia = true;
 
         // report the directory to the client

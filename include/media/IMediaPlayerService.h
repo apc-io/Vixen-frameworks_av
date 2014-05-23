@@ -87,6 +87,13 @@ public:
 
     virtual void addBatteryData(uint32_t params) = 0;
     virtual status_t pullBatteryData(Parcel* reply) = 0;
+#ifdef CFG_WMT_WPLAYER  	
+    /*
+        level 0 : suspend All Video Instance
+        level 1 : suspend only LOW_PRIORITY_VIDEO
+    */
+    virtual status_t suspendVideoInstance(int level, void * player, int flags) = 0;
+#endif	
 };
 
 // ----------------------------------------------------------------------------

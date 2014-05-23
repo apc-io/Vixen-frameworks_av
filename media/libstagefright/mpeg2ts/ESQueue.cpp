@@ -345,7 +345,17 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitPCMAudio() {
     }
 
     ABitReader bits(mBuffer->data(), 4);
+    /* Jason Modify:
+       Because ATSParser don't differentiate program descriptors,
+       this stream type (0x83) coulde be "TRUEHD" if program 
+       descriptors is "HDMV".
+       If it is not PCM, then just return NULL */
+#if 0
     CHECK_EQ(bits.getBits(8), 0xa0);
+#else
+    if(bits.getBits(8) != 0xa0)
+        return NULL;
+#endif
     unsigned numAUs = bits.getBits(8);
     bits.skipBits(8);
     unsigned quantization_word_length = bits.getBits(2);
@@ -644,10 +654,18 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitMPEGAudio() {
 
     size_t frameSize;
     int samplingRate, numChannels, bitrate, numSamples;
+#if 0
     CHECK(GetMPEGAudioFrameSize(
                 header, &frameSize, &samplingRate, &numChannels,
                 &bitrate, &numSamples));
-
+#else
+    if( GetMPEGAudioFrameSize(
+                header, &frameSize, &samplingRate, &numChannels,
+                &bitrate, &numSamples) == false ){
+        ALOGE("GetMPEGAudioFrameSize False crash\n");
+        return NULL;
+    }
+#endif
     if (size < frameSize) {
         return NULL;
     }
@@ -904,6 +922,7 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitMPEG4Video() {
 
                     state = EXPECT_VISUAL_OBJECT_START;
                 } else {
+                    offset += chunkSize;
                     discard = true;
                 }
                 break;

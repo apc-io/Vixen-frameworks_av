@@ -350,10 +350,8 @@ MP3Extractor::MP3Extractor(
 
     mInitCheck = OK;
 
-    // Get iTunes-style gapless info if present.
-    // When getting the id3 tag, skip the V1 tags to prevent the source cache
-    // from being iterated to the end of the file.
-    ID3 id3(mDataSource, true);
+    // get iTunes-style gapless info if present
+    ID3 id3(mDataSource);
     if (id3.isValid()) {
         ID3::Iterator *com = new ID3::Iterator(id3, "COM");
         if (com->done()) {

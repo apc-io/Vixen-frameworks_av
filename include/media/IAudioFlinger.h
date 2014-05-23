@@ -49,6 +49,7 @@ public:
         TRACK_DEFAULT = 0,  // client requests a default AudioTrack
         TRACK_TIMED   = 1,  // client requests a TimedAudioTrack
         TRACK_FAST    = 2,  // client requests a fast AudioTrack or AudioRecord
+        TRACK_PASSTHROUGH = 4,  // client requests a pass-through AudioTrack
     };
     typedef uint32_t track_flags_t;
 

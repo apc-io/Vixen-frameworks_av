@@ -27,6 +27,10 @@
 #include <media/stagefright/TimeSource.h>
 #include <utils/threads.h>
 #include <drm/DrmManagerClient.h>
+//siano code 2012.12.21 start
+#include "MtvController.h"
+#include "MtvExtractor.h"
+//siano code 2012.12.21 end
 
 namespace android {
 
@@ -102,7 +106,10 @@ struct AwesomePlayer {
     void postAudioSeekComplete();
 
     status_t dump(int fd, const Vector<String16> &args) const;
-
+   
+    //siano code 2012.12.21 start
+    void notifyAudioPTS(int msg, int ext1, int ext2);
+    //siano code 2012.12.21 end
 private:
     friend struct AwesomeEvent;
     friend struct PreviewPlayer;
@@ -238,7 +245,9 @@ private:
 
     sp<WVMExtractor> mWVMExtractor;
     sp<MediaExtractor> mExtractor;
-
+    //siano code 2012.12.21 start
+    sp<MtvController> mMtvController;
+    //siano code 2012.12.21 end
     status_t setDataSource_l(
             const char *uri,
             const KeyedVector<String8, String8> *headers = NULL);

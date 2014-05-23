@@ -29,6 +29,9 @@
 #include <ui/GraphicBuffer.h>
 #include <sys/atomics.h>
 
+#include <utils/CallStack.h>
+
+
 namespace android {
 
 MediaBuffer::MediaBuffer(void *data, size_t size)
@@ -86,22 +89,28 @@ MediaBuffer::MediaBuffer(const sp<ABuffer> &buffer)
 }
 
 void MediaBuffer::release() {
-    if (mObserver == NULL) {
+	//ALOGD("gecko stevexu:MediaBuffer::release %s got here ok,start",(mediaType==1)?"video":"audio");
+    if (mObserver == NULL) { 
         CHECK_EQ(mRefCount, 0);
+		//ALOGD("stevexu MediaBuffer::release %s fail 1",(mediaType==1)?"video":"audio");
         delete this;
-        return;
+		return;
     }
 
     int prevCount = __atomic_dec(&mRefCount);
     if (prevCount == 1) {
         if (mObserver == NULL) {
+			//ALOGD("stevexu MediaBuffer::release %s fail 2",(mediaType==1)?"video":"audio");
             delete this;
-            return;
+			return;
         }
-
-        mObserver->signalBufferReturned(this);
+		//ALOGD("stevexu MediaBuffer::release %s ok,mObserver notify signalBufferReturned mObserver=%p, popup buffer:%p",
+		//	(mediaType==1)?"video":"audio",mObserver,this);
+		mObserver->signalBufferReturned(this);
     }
     CHECK(prevCount > 0);
+
+	//ALOGD("gecko stevexu:MediaBuffer::release %s got here ok,end,prevCount =%d",(mediaType==1)?"video":"audio",prevCount);
 }
 
 void MediaBuffer::claim() {
@@ -113,6 +122,11 @@ void MediaBuffer::claim() {
 
 void MediaBuffer::add_ref() {
     (void) __atomic_inc(&mRefCount);
+	//ALOGD("stevexu MediaBuffer::add_ref_%s %p,mRefCount=%d",(mediaType==1)?"video":"audio",this,mRefCount);
+
+	//	android::CallStack stack;
+	//			stack.update( );
+	//			stack.dump("");// 
 }
 
 void *MediaBuffer::data() const {
@@ -173,6 +187,9 @@ MediaBuffer::~MediaBuffer() {
 void MediaBuffer::setObserver(MediaBufferObserver *observer) {
     CHECK(observer == NULL || mObserver == NULL);
     mObserver = observer;
+
+	//ALOGD("stevexu MediaBuffer::setObserver %p ",observer);
+	
 }
 
 void MediaBuffer::setNextBuffer(MediaBuffer *buffer) {

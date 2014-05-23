@@ -60,7 +60,9 @@ void FindAVCDimensions(
         parseUE(&br);  // bit_depth_luma_minus8
         parseUE(&br);  // bit_depth_chroma_minus8
         br.skipBits(1);  // qpprime_y_zero_transform_bypass_flag
-        CHECK_EQ(br.getBits(1), 0u);  // seq_scaling_matrix_present_flag
+        //CHECK_EQ(br.getBits(1), 0u);  // seq_scaling_matrix_present_flag
+        if(br.getBits(1) == 1)
+            return;
     }
 
     parseUE(&br);  // log2_max_frame_num_minus4

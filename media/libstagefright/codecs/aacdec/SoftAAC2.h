@@ -44,8 +44,8 @@ protected:
 
 private:
     enum {
-        kNumInputBuffers        = 4,
-        kNumOutputBuffers       = 4,
+        kNumInputBuffers        = 8,//stevexu
+        kNumOutputBuffers       = 8,//
     };
 
     HANDLE_AACDECODER mAACDecoder;

@@ -853,6 +853,7 @@ private:
             void triggerEvents(AudioSystem::sync_event_t type);
             virtual bool isTimedTrack() const { return false; }
             bool isFastTrack() const { return (mFlags & IAudioFlinger::TRACK_FAST) != 0; }
+            bool isPassthrough() const { return (mFlags & IAudioFlinger::TRACK_PASSTHROUGH) != 0; }
 
         protected:
 
@@ -1293,6 +1294,8 @@ public:
                     // accessible only within the threadLoop(), no locks required
                     //          mFastMixer->sq()    // for mutating and pushing state
                     int32_t     mFastMixerFutex;    // for cold idle
+                    sp<Track>   mPassthroughTrack;
+                    bool        mPassthroughEnabled;
 
     public:
         virtual     bool        hasFastMixer() const { return mFastMixer != NULL; }

@@ -53,6 +53,11 @@ private:
 
     void parseMetaData();
 
+    String8 mUri;
+
+    status_t createExternalRetriever();
+    MediaMetadataRetrieverInterface *mExternalRetriever;
+
     StagefrightMetadataRetriever(const StagefrightMetadataRetriever &);
 
     StagefrightMetadataRetriever &operator=(

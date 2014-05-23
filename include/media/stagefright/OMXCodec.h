@@ -60,6 +60,9 @@ struct OMXCodec : public MediaSource,
 
         // Secure decoding mode
         kUseSecureInputBuffers = 256,
+
+        // Output Frame as soon as possible
+        kOutputFrameAsap = 512,
     };
     static sp<MediaSource> Create(
             const sp<IOMX> &omx,
@@ -118,6 +121,8 @@ struct OMXCodec : public MediaSource,
             const MediaCodecList *list, size_t index);
 
     static bool findCodecQuirks(const char *componentName, uint32_t *quirks);
+
+    status_t setConfig(OMX_INDEXTYPE index, OMX_PTR component, size_t size);
 
 protected:
     virtual ~OMXCodec();

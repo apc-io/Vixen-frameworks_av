@@ -194,6 +194,9 @@ AwesomePlayer::AwesomePlayer()
       mVideoBuffer(NULL),
       mDecryptHandle(NULL),
       mLastVideoTimeUs(-1),
+      //siano code 2012.12.21 start
+      mMtvController(NULL),
+      //siano code 2012.12.21 end
       mTextDriver(NULL) {
     CHECK_EQ(mClient.connect(), (status_t)OK);
 
@@ -507,6 +510,13 @@ void AwesomePlayer::reset_l() {
     }
 
     while (mFlags & PREPARING) {
+		//siano code 2012.12.21 start
+        //NOTE:this hack is to prevent the long wait case when there is no signal but user force to close play
+        if( (mMtvController!=NULL)&&(mFlags&PREPARE_CANCELLED )){
+           ALOGD("MediaPlayer is being cancelled while preparing");  
+           break;
+        }
+        //siano code 2012.12.21 end
         mPreparedCondition.wait(mLock);
     }
 
@@ -583,7 +593,34 @@ void AwesomePlayer::reset_l() {
 
     mWatchForAudioSeekComplete = false;
     mWatchForAudioEOS = false;
+    //siano code 2012.12.21 start
+    if(mMtvController != NULL)
+    {
+        ALOGD("ISDBT reset_l");
+        mMtvController->disconnect();
+        mMtvController = NULL;
+    }
+    //siano code 2012.12.21 end
 }
+//siano code 2012.12.21 start
+
+void AwesomePlayer::notifyAudioPTS(int msg, int ext1, int ext2)
+{
+    sp<MediaPlayerBase> listener = mListener.promote();
+    if (listener != NULL) {
+        listener->sendEvent(msg, ext1, ext2);
+    }
+    return;
+}
+static void notifyAudioPTSCallback(void* privData, int pts)
+{
+    AwesomePlayer * player = (AwesomePlayer *)privData;
+    if(player) {
+	    player->notifyAudioPTS(MEDIA_INFO, MEDIA_INFO_UNKNOWN, pts);
+    }
+    return;
+}
+//siano code 2012.12.21 end
 
 void AwesomePlayer::notifyListener_l(int msg, int ext1, int ext2) {
     if (mListener != NULL) {
@@ -667,6 +704,62 @@ void AwesomePlayer::onBufferingUpdate() {
         return;
     }
     mBufferingEventPending = false;
+    //siano code 2012.12.21 start
+	if(mMtvController!=NULL)
+    {   
+        ALOGV("AwesomePlayer::onBufferingUpdate ISDBT cached for 500 msecond");
+	    if(mFlags & PREPARING) //TODO here to check cache percent, not if empty
+	    {
+		    if(mMtvController->isClientClosed())
+		    {
+				notifyListener_l(MEDIA_INFO, MEDIA_INFO_BUFFERING_END);
+				ALOGV("AwesomePlayer::onBufferingUpdate isdbt client is closed, finish prepare to close");
+				//there is no need to notify the mediaplayer
+				//notifyListener_l(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, CONTROL_PREPARING_TIMEOUT);
+				finishAsyncPrepare_l();
+		    }
+		    else
+		    {
+		        if (mMtvController->isAudioBufferedNFrame(2)) {
+			        notifyListener_l(MEDIA_INFO, MEDIA_INFO_BUFFERING_END);
+			        ALOGV("AwesomePlayer::onBufferingUpdate ISDBT finishAsyncPrepare_l()");
+			        finishAsyncPrepare_l();
+		        }
+		        else
+		        {
+			        notifyListener_l(MEDIA_INFO, MEDIA_INFO_BUFFERING_START);
+			        ALOGV("AwesomePlayer::onBufferingUpdate continue isdbt cached for 500 msecond");
+		        }
+	        }
+	    }
+	    else if(mFlags & PLAYING)
+	    {
+		    if (!mMtvController->isAudioBufferedNFrame(1)) {
+			    ALOGI("AwesomePlayer::onBufferingUpdate isdbt cached less than 1 frame, buffered for a while");
+			    mFlags |= CACHE_UNDERRUN;
+                pause_l();
+                notifyListener_l(MEDIA_INFO, MEDIA_INFO_BUFFERING_START);
+		    }
+	    }
+	    else if(mFlags & CACHE_UNDERRUN)
+	    {
+		    if(mMtvController->isAudioBufferedNFrame(2)) {
+			    ALOGI("AwesomePlayer::onBufferingUpdate isdbt cached 2 frames");
+			    mFlags &= ~CACHE_UNDERRUN;
+			    play_l();
+			    notifyListener_l(MEDIA_INFO, MEDIA_INFO_BUFFERING_END);
+		    }
+		    else
+		    {
+			    ALOGI("AwesomePlayer::onBufferingUpdate isdbt cached still less than 2 frames, go on cacheing");
+		    }
+	    }
+	    else
+	    {
+		    ;
+	    }
+    }
+    //siano code 2012.12.21 end
 
     if (mCachedSource != NULL) {
         status_t finalStatus;
@@ -1801,6 +1894,14 @@ void AwesomePlayer::onVideoEvent() {
         }
 
         if (latenessUs < -10000) {
+		   if(mMtvController != NULL && latenessUs < -10000000) //10s
+            {
+				ALOGV("!!==== ISDBT drop video frames for SG signal ====!!");
+				mVideoBuffer->release();
+				mVideoBuffer = NULL;
+				postVideoEvent_l();
+				return;
+			}
             // We're more than 10ms early.
             postVideoEvent_l(10000);
             return;
@@ -2121,7 +2222,37 @@ status_t AwesomePlayer::finishSetDataSource_l() {
                 return UNKNOWN_ERROR;
             }
         }
-    } else {
+    }
+    //siano code 2012.12.21 start 
+    else if (!strncasecmp("isdbt:", mUri.string(), 6))
+    {
+	    ALOGD("AwesomePlayer::finishSetDataSource_l(): url is isdbt ");
+		
+	    //first connect to mtvserver
+	    mMtvController = new MtvController();
+	    status_t err = mMtvController->connect();
+
+        ALOGI("AwesomePlayer::finishSetDataSource_l(): mMtvController->connect returned %d", err);
+
+        if (err != OK) {
+            ALOGE("AwesomePlayer::finishSetDataSource_l(): connect to mtvserver error");
+            return err;
+        }
+        
+        mMtvController->pNotifyListenerCallback = notifyAudioPTSCallback;
+        mMtvController->mPrivData = this;
+        
+        MtvExtractor* tmpEx = new MtvExtractor(mMtvController);
+        
+        sp<MediaExtractor> extractor = tmpEx;
+        
+        tmpEx->init();
+        
+	    //here set the extractor
+	    return setDataSource_l(extractor);
+    }
+    //siano code 2012.12.21 end
+    else {
         dataSource = DataSource::CreateFromURI(mUri.string(), &mUriHeaders);
     }
 
@@ -2236,7 +2367,9 @@ void AwesomePlayer::onPrepareAsyncEvent() {
 
     modifyFlags(PREPARING_CONNECTED, SET);
 
-    if (isStreamingHTTP()) {
+    if (isStreamingHTTP() || mMtvController != NULL) {
+ //   if (isStreamingHTTP()) {
+	//siano code 2012.12.21 end
         postBufferingEvent_l();
     } else {
         finishAsyncPrepare_l();

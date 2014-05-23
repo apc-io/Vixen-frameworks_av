@@ -30,6 +30,7 @@
 #include "include/WVMExtractor.h"
 #include "include/FLACExtractor.h"
 #include "include/AACExtractor.h"
+#include "include/AVIExtractor.h"
 
 #include "matroska/MatroskaExtractor.h"
 

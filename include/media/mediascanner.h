@@ -86,12 +86,14 @@ public:
     void setLocale(const char* locale);
     void beginFile();
     status_t addStringTag(const char* name, const char* value);
+    status_t addBytesTag( uint8_t* data,const int size);
     void endFile();
 
     virtual status_t scanFile(const char* path, long long lastModified,
             long long fileSize, bool isDirectory, bool noMedia) = 0;
     virtual status_t handleStringTag(const char* name, const char* value) = 0;
     virtual status_t setMimeType(const char* mimeType) = 0;
+    virtual status_t handleBytesTag( uint8_t* data,const int size) = 0;
 
 protected:
     void convertValues(uint32_t encoding);

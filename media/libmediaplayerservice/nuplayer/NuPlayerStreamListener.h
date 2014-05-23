@@ -31,12 +31,15 @@ struct NuPlayer::NuPlayerStreamListener : public BnStreamListener {
             const sp<IStreamSource> &source,
             ALooper::handler_id targetID);
 
+    virtual ~NuPlayerStreamListener();
     virtual void queueBuffer(size_t index, size_t size);
 
     virtual void issueCommand(
             Command cmd, bool synchronous, const sp<AMessage> &extra);
 
     void start();
+    void stop();
+
     ssize_t read(void *data, size_t size, sp<AMessage> *extra);
 
 private:
@@ -64,7 +67,9 @@ private:
     Vector<sp<IMemory> > mBuffers;
     List<QueueEntry> mQueue;
     bool mEOS;
+    bool mSTOP;	
     bool mSendDataNotification;
+    int mRdSize;
 
     DISALLOW_EVIL_CONSTRUCTORS(NuPlayerStreamListener);
 };

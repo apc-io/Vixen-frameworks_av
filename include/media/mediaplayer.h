@@ -42,6 +42,7 @@ enum media_event_type {
     MEDIA_BUFFERING_UPDATE  = 3,
     MEDIA_SEEK_COMPLETE     = 4,
     MEDIA_SET_VIDEO_SIZE    = 5,
+    MEDIA_TIMED_BITMAP		= 98,
     MEDIA_TIMED_TEXT        = 99,
     MEDIA_ERROR             = 100,
     MEDIA_INFO              = 200,
@@ -125,6 +126,9 @@ enum media_info_type {
 
     //9xx
     MEDIA_INFO_TIMED_TEXT_ERROR = 900,
+
+    //10xx
+    MEDIA_INFO_SOUCRE_STATUS = 1000,
 };
 
 
@@ -242,6 +246,7 @@ private:
             status_t        doSetRetransmitEndpoint(const sp<IMediaPlayer>& player);
 
     sp<IMediaPlayer>            mPlayer;
+    sp<ISurfaceTexture>         mSurfaceTexture;
     thread_id_t                 mLockThreadId;
     Mutex                       mLock;
     Mutex                       mNotifyLock;
@@ -249,6 +254,7 @@ private:
     sp<MediaPlayerListener>     mListener;
     void*                       mCookie;
     media_player_states         mCurrentState;
+    int                         mDuration;
     int                         mCurrentPosition;
     int                         mSeekPosition;
     bool                        mPrepareSync;

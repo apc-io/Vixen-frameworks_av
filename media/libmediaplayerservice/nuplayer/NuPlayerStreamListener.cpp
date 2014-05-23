@@ -32,7 +32,9 @@ NuPlayer::NuPlayerStreamListener::NuPlayerStreamListener(
         ALooper::handler_id id)
     : mSource(source),
       mTargetID(id),
+      mSTOP(false),
       mEOS(false),
+      mRdSize(0),
       mSendDataNotification(true) {
     mSource->setListener(this);
 
@@ -46,13 +48,34 @@ NuPlayer::NuPlayerStreamListener::NuPlayerStreamListener(
     mSource->setBuffers(mBuffers);
 }
 
+NuPlayer::NuPlayerStreamListener::~NuPlayerStreamListener(){
+    ALOGD("Uninited. read %d bytes",mRdSize);
+}
+
 void NuPlayer::NuPlayerStreamListener::start() {
+    ALOGV("start.");
     for (size_t i = 0; i < kNumBuffers; ++i) {
         mSource->onBufferAvailable(i);
     }
+    Mutex::Autolock autoLock(mLock);
+    mSTOP = false;	
+}
+
+void NuPlayer::NuPlayerStreamListener::stop() {
+    ALOGV("Stop. read %d bytes",mRdSize);
+    Mutex::Autolock autoLock(mLock);
+    mSTOP = true;
 }
 
 void NuPlayer::NuPlayerStreamListener::queueBuffer(size_t index, size_t size) {
+    if(mSTOP){ // Jason Add: suck up all rest data if stream is stop to prevent blocking next stream
+        mRdSize += size;
+        ALOGD("[queueBuffer] skip data (RdSize %d). mTargetID %d idx %d size %d",
+            mRdSize,mTargetID,index,size);
+        mSource->onBufferAvailable(index);
+        return;
+    }
+
     QueueEntry entry;
     entry.mIsCommand = false;
     entry.mIndex = index;
@@ -105,6 +128,10 @@ ssize_t NuPlayer::NuPlayerStreamListener::read(
     }
 
     if (mQueue.empty()) {
+
+        if(!mSendDataNotification)
+            ALOGD("[read] mQueue empty. size %d",mRdSize);
+
         mSendDataNotification = true;
 
         return -EWOULDBLOCK;
@@ -158,6 +185,7 @@ ssize_t NuPlayer::NuPlayerStreamListener::read(
         entry = NULL;
     }
 
+    mRdSize += copy;
     return copy;
 }
 

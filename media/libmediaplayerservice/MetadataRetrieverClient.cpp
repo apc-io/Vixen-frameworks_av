@@ -85,8 +85,17 @@ static sp<MediaMetadataRetrieverBase> createRetriever(player_type playerType)
     switch (playerType) {
         case STAGEFRIGHT_PLAYER:
         case NU_PLAYER:
+#ifdef CFG_WMT_WPLAYER    
+        case WMT_PLAYER:
+#endif			
         {
-            p = new StagefrightMetadataRetriever;
+            #ifdef CFG_WMT_WPLAYER    
+                //[WMT] createWmtMetadataRetriever is defined in libwmtmetadataretriever.so
+                extern MediaMetadataRetrieverBase * createWmtMetadataRetriever();
+                p = createWmtMetadataRetriever();
+            #else
+                p = new StagefrightMetadataRetriever;
+            #endif
             break;
         }
         case SONIVOX_PLAYER:

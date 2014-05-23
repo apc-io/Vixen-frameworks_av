@@ -30,12 +30,11 @@ struct NuPlayer::StreamingSource : public NuPlayer::Source {
     StreamingSource(const sp<IStreamSource> &source);
 
     virtual void start();
+    virtual void stop();
 
     virtual status_t feedMoreTSData();
 
     virtual status_t dequeueAccessUnit(bool audio, sp<ABuffer> *accessUnit);
-
-    virtual uint32_t flags() const;
 
 protected:
     virtual ~StreamingSource();
@@ -47,6 +46,7 @@ private:
     status_t mFinalResult;
     sp<NuPlayerStreamListener> mStreamListener;
     sp<ATSParser> mTSParser;
+    int mDumpStreamFd;
 
     DISALLOW_EVIL_CONSTRUCTORS(StreamingSource);
 };

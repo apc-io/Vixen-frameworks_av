@@ -36,7 +36,9 @@ LOCAL_SHARED_LIBRARIES :=       \
     libstagefright_wfd          \
     libutils                    \
     libvorbisidec               \
-
+    libwmtapi                   \
+    libwmtenv
+    
 LOCAL_STATIC_LIBRARIES :=       \
     libstagefright_nuplayer     \
     libstagefright_rtsp         \
@@ -48,8 +50,28 @@ LOCAL_C_INCLUDES :=                                                 \
     $(TOP)/frameworks/av/media/libstagefright/wifi-display          \
     $(TOP)/frameworks/native/include/media/openmax                  \
     $(TOP)/external/tremolo/Tremolo                                 \
+    $(TOP)/frameworks/av/media/libstagefright/MtvPluginSource       \
+    $(TOP)/frameworks/av/media/libstagefright/MtvPluginSource/core
+
 
 LOCAL_MODULE:= libmediaplayerservice
+LOCAL_CFLAGS += -D__STDC_CONSTANT_MACROS 
+#stevexu LOCAL_CFLAGS += -DCFG_WMT_WPLAYER
+
+WMT_WPLAYER := disable
+
+ifeq ($(WMT_WPLAYER),enable)
+LOCAL_C_INCLUDES += \
+    $(TOP)/device/via/common/wplayer/lib                            \
+    $(TOP)/device/via/common/ffmpeg                                 \
+    $(TOP)/device/via/common/wmtpe                                  \
+#   $(TOP)/device/via/common/wmt_api/include
+
+LOCAL_SHARED_LIBRARIES += \
+    libwplayer \
+#   libwmtapi
+
+endif
 
 include $(BUILD_SHARED_LIBRARY)
 

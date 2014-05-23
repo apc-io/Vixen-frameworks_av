@@ -876,6 +876,10 @@ status_t AudioTrack::createTrack_l(
         }
     }
 
+    if (flags & AUDIO_OUTPUT_FLAG_DIRECT) {
+        trackFlags |= IAudioFlinger::TRACK_PASSTHROUGH;
+    }
+
     sp<IAudioTrack> track = audioFlinger->createTrack(getpid(),
                                                       streamType,
                                                       sampleRate,
@@ -976,8 +980,11 @@ status_t AudioTrack::obtainBuffer(Buffer* audioBuffer, int32_t waitCount)
             }
             if (!(cblk->flags & CBLK_INVALID_MSK)) {
                 mLock.unlock();
-                result = cblk->cv.waitRelative(cblk->lock, milliseconds(waitTimeMs));
-                cblk->lock.unlock();
+                  //ALOGD("stevexu:cblk->cv.waitRelative start");
+				  result = cblk->cv.waitRelative(cblk->lock, milliseconds(waitTimeMs));
+				  //ALOGD("stevexu:cblk->cv.waitRelative end");
+
+				cblk->lock.unlock();
                 mLock.lock();
                 if (!mActive) {
                     return status_t(STOPPED);

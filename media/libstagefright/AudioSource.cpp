@@ -262,7 +262,7 @@ status_t AudioSource::read(
 }
 
 void AudioSource::signalBufferReturned(MediaBuffer *buffer) {
-    ALOGV("signalBufferReturned: %p", buffer->data());
+    ALOGD("AudioSource::signalBufferReturned: %p", buffer->data());
     Mutex::Autolock autoLock(mLock);
     --mNumClientOwnedBuffers;
     buffer->setObserver(0);

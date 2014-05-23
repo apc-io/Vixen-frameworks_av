@@ -17,6 +17,7 @@
 //#define LOG_NDEBUG 0
 #define LOG_TAG "StreamingSource"
 #include <utils/Log.h>
+#include <cutils/properties.h>
 
 #include "StreamingSource.h"
 
@@ -30,14 +31,33 @@
 #include <media/stagefright/MediaSource.h>
 #include <media/stagefright/MetaData.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 namespace android {
 
 NuPlayer::StreamingSource::StreamingSource(const sp<IStreamSource> &source)
     : mSource(source),
       mFinalResult(OK) {
+    char value[PROPERTY_VALUE_MAX+32];
+    mDumpStreamFd = -1;
+    property_get("media.source.dumpstream", value, "disable");
+    if (strcasecmp(value, "disable")){
+        time_t timep;
+        struct tm *p;
+        char *buf = value + strlen(value);
+        time(&timep);
+        p = localtime(&timep);
+        sprintf(buf,"/StreamingSource_%02d%02d_%02d%02d%02d.ts",1+p->tm_mon,p->tm_mday,p->tm_hour,p->tm_min,p->tm_sec);
+        mDumpStreamFd = open(value, O_CREAT|O_RDWR, S_IRWXU|S_IRWXG|S_IRWXO);
+        ALOGI("Dumptstream to %s. fd = %d err %d", value, mDumpStreamFd, errno);
+    }
 }
 
 NuPlayer::StreamingSource::~StreamingSource() {
+    if(mDumpStreamFd != -1)
+        close(mDumpStreamFd);
 }
 
 void NuPlayer::StreamingSource::start() {
@@ -54,6 +74,11 @@ void NuPlayer::StreamingSource::start() {
 
     mStreamListener->start();
 }
+
+void NuPlayer::StreamingSource::stop() {
+    if (mStreamListener.get()) // because StreamingSource not start, Listener not create.
+        mStreamListener->stop();
+};
 
 status_t NuPlayer::StreamingSource::feedMoreTSData() {
     if (mFinalResult != OK) {
@@ -89,31 +114,20 @@ status_t NuPlayer::StreamingSource::feedMoreTSData() {
                     (ATSParser::DiscontinuityType)type, extra);
         } else if (n < 0) {
             CHECK_EQ(n, -EWOULDBLOCK);
-            break;
+            // break;
+            return n; // let NuPlayer know read idle
         } else {
             if (buffer[0] == 0x00) {
                 // XXX legacy
-
-                if (extra == NULL) {
-                    extra = new AMessage;
-                }
-
-                uint8_t type = buffer[1];
-
-                if (type & 2) {
-                    int64_t mediaTimeUs;
-                    memcpy(&mediaTimeUs, &buffer[2], sizeof(mediaTimeUs));
-
-                    extra->setInt64(IStreamListener::kKeyMediaTimeUs, mediaTimeUs);
-                }
-
                 mTSParser->signalDiscontinuity(
-                        ((type & 1) == 0)
+                        buffer[1] == 0x00
                             ? ATSParser::DISCONTINUITY_SEEK
                             : ATSParser::DISCONTINUITY_FORMATCHANGE,
                         extra);
             } else {
                 status_t err = mTSParser->feedTSPacket(buffer, sizeof(buffer));
+                if (mDumpStreamFd != -1)
+                    write(mDumpStreamFd,buffer,sizeof(buffer));
 
                 if (err != OK) {
                     ALOGE("TS Parser returned error %d", err);
@@ -171,10 +185,6 @@ status_t NuPlayer::StreamingSource::dequeueAccessUnit(
 #endif
 
     return err;
-}
-
-uint32_t NuPlayer::StreamingSource::flags() const {
-    return 0;
 }
 
 }  // namespace android

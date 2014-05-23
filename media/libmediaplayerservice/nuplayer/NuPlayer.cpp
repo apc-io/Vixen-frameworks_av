@@ -57,9 +57,9 @@ NuPlayer::NuPlayer()
       mVideoIsAVC(false),
       mAudioEOS(false),
       mVideoEOS(false),
+      mSourceIdle(true),
       mScanSourcesPending(false),
       mScanSourcesGeneration(0),
-      mPollDurationGeneration(0),
       mTimeDiscontinuityPending(false),
       mFlushingAudio(NONE),
       mFlushingVideo(NONE),
@@ -211,28 +211,6 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
             break;
         }
 
-        case kWhatPollDuration:
-        {
-            int32_t generation;
-            CHECK(msg->findInt32("generation", &generation));
-
-            if (generation != mPollDurationGeneration) {
-                // stale
-                break;
-            }
-
-            int64_t durationUs;
-            if (mDriver != NULL && mSource->getDuration(&durationUs) == OK) {
-                sp<NuPlayerDriver> driver = mDriver.promote();
-                if (driver != NULL) {
-                    driver->notifyDuration(durationUs);
-                }
-            }
-
-            msg->post(1000000ll);  // poll again in a second.
-            break;
-        }
-
         case kWhatSetVideoNativeWindow:
         {
             ALOGV("kWhatSetVideoNativeWindow");
@@ -297,9 +275,6 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
             ALOGV("scanning sources haveAudio=%d, haveVideo=%d",
                  mAudioDecoder != NULL, mVideoDecoder != NULL);
 
-            bool mHadAnySourcesBefore =
-                (mAudioDecoder != NULL) || (mVideoDecoder != NULL);
-
             if (mNativeWindow != NULL) {
                 instantiateDecoder(false, &mVideoDecoder);
             }
@@ -308,30 +283,33 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                 instantiateDecoder(true, &mAudioDecoder);
             }
 
-            if (!mHadAnySourcesBefore
-                    && (mAudioDecoder != NULL || mVideoDecoder != NULL)) {
-                // This is the first time we've found anything playable.
-
-                uint32_t flags = mSource->flags();
-
-                if (flags & Source::FLAG_DYNAMIC_DURATION) {
-                    schedulePollDuration();
-                }
-            }
-
             status_t err;
             if ((err = mSource->feedMoreTSData()) != OK) {
-                if (mAudioDecoder == NULL && mVideoDecoder == NULL) {
-                    // We're not currently decoding anything (no audio or
-                    // video tracks found) and we just ran out of input data.
-
-                    if (err == ERROR_END_OF_STREAM) {
-                        notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
-                    } else {
-                        notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
-                    }
+                if(mSourceIdle == false){
+                    ALOGI("ScanSources: mSource idle!!");
+                    notifyListener(MEDIA_INFO, MEDIA_INFO_SOUCRE_STATUS, 0);
                 }
-                break;
+                mSourceIdle = true;
+                if (err != -EWOULDBLOCK){
+                    if (mAudioDecoder == NULL && mVideoDecoder == NULL) {
+                        // We're not currently decoding anything (no audio or
+                        // video tracks found) and we just ran out of input data.
+
+                        if (err == ERROR_END_OF_STREAM) {
+                            notifyListener(MEDIA_PLAYBACK_COMPLETE, 0, 0);
+                        } else {
+                            notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
+                        }
+                    }
+                    break;
+                }
+            }
+            else{
+                if(mSourceIdle == true){
+                    ALOGI("ScanSources: mSource process!!");
+                    notifyListener(MEDIA_INFO, MEDIA_INFO_SOUCRE_STATUS, 1);
+                }
+                mSourceIdle = false;
             }
 
             if ((mAudioDecoder == NULL && mAudioSink != NULL)
@@ -358,7 +336,18 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
                         audio, codecRequest);
 
                 if (err == -EWOULDBLOCK) {
-                    if (mSource->feedMoreTSData() == OK) {
+                    err = mSource->feedMoreTSData();
+                    if (err == -EWOULDBLOCK && mSourceIdle == false){
+                        ALOGI("AVNotify: mSource idle!!");
+                        notifyListener(MEDIA_INFO, MEDIA_INFO_SOUCRE_STATUS, 0);
+                        mSourceIdle = true;
+                    }
+                    if (err == OK && mSourceIdle == true){
+                        ALOGI("AVNotify: mSource process!!");
+                        notifyListener(MEDIA_INFO, MEDIA_INFO_SOUCRE_STATUS, 1);
+                        mSourceIdle = false;
+                    }
+                    if (err == OK || err == -EWOULDBLOCK) {
                         msg->post(10000ll);
                     }
                 }
@@ -570,8 +559,6 @@ void NuPlayer::onMessageReceived(const sp<AMessage> &msg) {
         case kWhatReset:
         {
             ALOGV("kWhatReset");
-
-            cancelPollDuration();
 
             if (mRenderer != NULL) {
                 // There's an edge case where the renderer owns all output
@@ -1013,16 +1000,6 @@ status_t NuPlayer::setVideoScalingMode(int32_t mode) {
         }
     }
     return OK;
-}
-
-void NuPlayer::schedulePollDuration() {
-    sp<AMessage> msg = new AMessage(kWhatPollDuration, id());
-    msg->setInt32("generation", mPollDurationGeneration);
-    msg->post();
-}
-
-void NuPlayer::cancelPollDuration() {
-    ++mPollDurationGeneration;
 }
 
 }  // namespace android

@@ -29,6 +29,8 @@
 #include <media/AudioSystem.h>
 #include <media/Metadata.h>
 
+// #define CFG_WMT_WPLAYER    /* Add new player (WMT Player) */
+
 // Fwd decl to make sure everyone agrees that the scope of struct sockaddr_in is
 // global, and not in android::
 struct sockaddr_in;
@@ -50,6 +52,12 @@ enum player_type {
     // The shared library with the test player is passed passed as an
     // argument to the 'test:' url in the setDataSource call.
     TEST_PLAYER = 5,
+    
+#ifdef CFG_WMT_WPLAYER
+    WMT_PLAYER = 6,
+#else
+    WMT_PLAYER = STAGEFRIGHT_PLAYER,
+#endif
 };
 
 
